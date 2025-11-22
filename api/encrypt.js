@@ -10,7 +10,7 @@ const publicKeyPath = resolve(publicKeyFileName);
 
 // This function runs on every API call
 export default async function handler(req, res) {
-    // 1. Set CORS Headers (Crucial for Vercel/API usage)
+    // 1. Set CORS Headers
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -26,25 +26,28 @@ export default async function handler(req, res) {
     try {
         const { name, email, message, recipient, subjectLine } = req.body;
 
-        // Basic input validation
         if (!name || !email || !message) {
             return res.status(400).json({ error: 'Missing required fields: name, email, or message.' });
         }
 
         // --- PGP Key Loading & Encryption Logic ---
         
-        // ** CRITICAL KEY CHECK **
+        console.log('--- STARTING ENCRYPTION PROCESS ---');
+
+        // Check if key file exists
         if (!existsSync(publicKeyPath)) {
              throw new Error(`Public key file not found on server at: ${publicKeyPath}`);
         }
         
-        // Load Public Key from the server's file system
+        // Load Public Key
         const publicKeyArmored = readFileSync(publicKeyPath, 'utf8');
+        console.log('Public Key loaded successfully.');
         const publicKey = await openpgp.readKey({ armoredKey: publicKeyArmored });
 
         // Prepare Message
         const fullMessage = `From: ${name} <${email}>\n\n${message}`;
         const msg = await openpgp.createMessage({ text: fullMessage });
+        console.log('Message created.');
 
         // Encrypt Message
         const encryptedResult = await openpgp.encrypt({
@@ -52,22 +55,30 @@ export default async function handler(req, res) {
             encryptionKeys: publicKey,
         });
 
-        // 🔑 SIMPLER FIX: We will trust the standard Node.js result and convert .data
+        // 🔑 The critical output retrieval attempt
         let encrypted = encryptedResult.data;
 
-        // Ensure the output is a string, which is needed for encodeURIComponent
+        // ** DEBUG LOGGING **
+        console.log('Encrypted Result Object Keys:', Object.keys(encryptedResult));
+        console.log('Type of encryptedResult.data:', typeof encryptedResult.data);
+        console.log('Value of encryptedResult.data (first 50 chars):', encrypted ? encrypted.substring(0, 50) : 'undefined');
+        // ** END DEBUG LOGGING **
+
+
+        // Ensure the output is a string
         if (typeof encrypted !== 'string') {
-             // If .data is a Uint8Array or Buffer (common in Node), convert it.
-             // If it's the Message object, this will fail the next check.
-             encrypted = String(encrypted);
+             // If it's not a string, try the write method as a final fallback for non-standard output
+             if (encryptedResult.message && typeof encryptedResult.message.write === 'function') {
+                 encrypted = await encryptedResult.message.write();
+             } else {
+                 // Convert anything else to a string for final failure logging
+                 encrypted = String(encrypted); 
+             }
         }
 
-        // Final Validation check (This was line 65, which failed previously)
+        // Final Validation check (This is the line that will trigger the error if output is bad)
         if (!encrypted || encrypted.length < 50 || !encrypted.startsWith('-----BEGIN PGP MESSAGE-----')) {
-            // Log the actual type and start of the result for debugging
-            console.error("Failed Encrypted Output Start:", encrypted.substring(0, 50));
-            console.error("Failed Encrypted Output Type:", typeof encrypted);
-
+            console.error('FINAL VALIDATION FAILED. Full Encrypted Value:', encrypted);
             throw new Error("Encryption failed: Could not retrieve PGP armored block.");
         }
 
@@ -80,7 +91,8 @@ export default async function handler(req, res) {
         res.status(200).json({ success: true, mailtoUrl });
 
     } catch (error) {
-        console.error('Encryption API Error:', error);
+        console.error('--- FATAL ENCRYPTION API ERROR ---');
+        console.error('Error details:', error);
         res.status(500).json({ 
             success: false, 
             error: 'Server-side encryption failed.',
