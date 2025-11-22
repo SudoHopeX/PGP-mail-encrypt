@@ -1,0 +1,12 @@
+{
+  "name": "pgp-mailer-api",
+  "version": "1.0.0",
+  "description": "Serverless PGP encryption endpoint for mailto links.",
+  "main": "api/encrypt.js",
+  "scripts": {
+    "start": "vercel dev"
+  },
+  "dependencies": {
+    "openpgp": "^5.0.0"
+  }
+}
