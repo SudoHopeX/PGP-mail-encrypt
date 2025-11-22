@@ -1,11 +1,12 @@
 // api/encrypt.js
 
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import * as openpgp from 'openpgp';
 
 // Define the path to your public key relative to the serverless function file
-const publicKeyPath = resolve('./sudohopex-email-pub-key.asc');
+const publicKeyFileName = 'sudohopex-email-pub-key.asc';
+const publicKeyPath = resolve(publicKeyFileName);
 
 // This function runs on every API call
 export default async function handler(req, res) {
@@ -30,7 +31,12 @@ export default async function handler(req, res) {
             return res.status(400).json({ error: 'Missing required fields: name, email, or message.' });
         }
 
-        // --- PGP Encryption Logic ---
+        // --- PGP Key Loading & Encryption Logic ---
+        
+        // ** CRITICAL KEY CHECK **
+        if (!existsSync(publicKeyPath)) {
+             throw new Error(`Public key file not found on server at: ${publicKeyPath}`);
+        }
         
         // Load Public Key from the server's file system
         const publicKeyArmored = readFileSync(publicKeyPath, 'utf8');
@@ -38,7 +44,6 @@ export default async function handler(req, res) {
 
         // Prepare Message
         const fullMessage = `From: ${name} <${email}>\n\n${message}`;
-        // Create the PGP Message object from the string
         const msg = await openpgp.createMessage({ text: fullMessage });
 
         // Encrypt Message
@@ -47,21 +52,22 @@ export default async function handler(req, res) {
             encryptionKeys: publicKey,
         });
 
-        // 🔑 THE FIX: Safely retrieve the armored output as a string.
-        let encrypted = undefined;
+        // 🔑 SIMPLER FIX: We will trust the standard Node.js result and convert .data
+        let encrypted = encryptedResult.data;
 
-        // Try the most robust method for Node/Vercel: .message.write()
-        if (encryptedResult.message && typeof encryptedResult.message.write === 'function') {
-            // .write() forces the message object to serialize to an armored string
-            encrypted = await encryptedResult.message.write();
-        } else if (encryptedResult.data) {
-            // Fallback for string-like .data property
-            encrypted = encryptedResult.data.toString();
+        // Ensure the output is a string, which is needed for encodeURIComponent
+        if (typeof encrypted !== 'string') {
+             // If .data is a Uint8Array or Buffer (common in Node), convert it.
+             // If it's the Message object, this will fail the next check.
+             encrypted = String(encrypted);
         }
 
+        // Final Validation check (This was line 65, which failed previously)
+        if (!encrypted || encrypted.length < 50 || !encrypted.startsWith('-----BEGIN PGP MESSAGE-----')) {
+            // Log the actual type and start of the result for debugging
+            console.error("Failed Encrypted Output Start:", encrypted.substring(0, 50));
+            console.error("Failed Encrypted Output Type:", typeof encrypted);
 
-        // Validation check (This was line 53, which failed previously)
-        if (!encrypted || typeof encrypted !== 'string' || encrypted.length < 50 || !encrypted.startsWith('-----BEGIN PGP MESSAGE-----')) {
             throw new Error("Encryption failed: Could not retrieve PGP armored block.");
         }
 
@@ -75,7 +81,6 @@ export default async function handler(req, res) {
 
     } catch (error) {
         console.error('Encryption API Error:', error);
-        // Ensure error response is a consistent format
         res.status(500).json({ 
             success: false, 
             error: 'Server-side encryption failed.',
