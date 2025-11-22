@@ -1,7 +1,7 @@
 # api/index.py
 
 from flask import Flask, request, jsonify
-from pgpy import PGPKey, PGPMessge, PGPMessage, constants
+from pgpy import PGPKey, PGPMessage, constants
 from pgpy.errors import PGPError
 import os
 import json
