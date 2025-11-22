@@ -10,7 +10,7 @@ const publicKeyPath = resolve('./sudohopex-email-pub-key.asc');
 // This function runs on every API call
 export default async function handler(req, res) {
     // 1. Set CORS Headers (Crucial for Vercel/API usage)
-    res.setHeader('Access-Control-Allow-Origin', '*'); // Allow all origins for simplicity
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
@@ -38,6 +38,7 @@ export default async function handler(req, res) {
 
         // Prepare Message
         const fullMessage = `From: ${name} <${email}>\n\n${message}`;
+        // Create the PGP Message object from the string
         const msg = await openpgp.createMessage({ text: fullMessage });
 
         // Encrypt Message
@@ -46,10 +47,21 @@ export default async function handler(req, res) {
             encryptionKeys: publicKey,
         });
 
-        // Use the standard .data property for the armored string
-        const encrypted = encryptedResult.data;
+        // 🔑 THE FIX: Safely retrieve the armored output as a string.
+        let encrypted = undefined;
 
-        if (!encrypted || typeof encrypted !== 'string' || encrypted.length < 50) {
+        // Try the most robust method for Node/Vercel: .message.write()
+        if (encryptedResult.message && typeof encryptedResult.message.write === 'function') {
+            // .write() forces the message object to serialize to an armored string
+            encrypted = await encryptedResult.message.write();
+        } else if (encryptedResult.data) {
+            // Fallback for string-like .data property
+            encrypted = encryptedResult.data.toString();
+        }
+
+
+        // Validation check (This was line 53, which failed previously)
+        if (!encrypted || typeof encrypted !== 'string' || encrypted.length < 50 || !encrypted.startsWith('-----BEGIN PGP MESSAGE-----')) {
             throw new Error("Encryption failed: Could not retrieve PGP armored block.");
         }
 
@@ -58,11 +70,12 @@ export default async function handler(req, res) {
         const body = encodeURIComponent(encrypted);
         const mailtoUrl = `mailto:${recipient}?subject=${subject}&body=${body}`;
 
-        // 2. Return the mailto URL to the client
+        // Return the mailto URL to the client
         res.status(200).json({ success: true, mailtoUrl });
 
     } catch (error) {
         console.error('Encryption API Error:', error);
+        // Ensure error response is a consistent format
         res.status(500).json({ 
             success: false, 
             error: 'Server-side encryption failed.',
