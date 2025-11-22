@@ -1,12 +1,8 @@
 {
   "name": "pgp-mailer-api",
   "version": "1.0.0",
-  "description": "Serverless PGP encryption endpoint for mailto links.",
-  "main": "api/encrypt.js",
+  "description": "Serverless PGP encryption endpoint (Python/Flask).",
   "scripts": {
     "start": "vercel dev"
-  },
-  "dependencies": {
-    "openpgp": "^5.0.0"
   }
 }
